@@ -60,26 +60,26 @@ EOF
 if [ $# -ge 1 ]; then
   ARG1="$1"
 else
-  read "ARG1?Código hex (ej. #FF5500) o 'off' para quitar la barra y el inicio automático: "
+  read "ARG1?Enter a hex color (e.g. #FF5500) or 'off' to remove the overlay and auto-start: "
 fi
 
 case "${ARG1:l}" in
   off|stop|quit|disable|quitar|0)
     stop_overlay "true"
-    echo "Capa de color eliminada y desactivada del inicio del sistema."
+    echo "Menu bar tint overlay removed and disabled from login startup."
     exit 0
     ;;
 esac
 
 HEX="${ARG1#\#}"
 if [[ ! "$HEX" =~ ^[0-9A-Fa-f]{6}$ ]]; then
-  echo "Error: '$ARG1' no es un código hexadecimal válido (ej. #FF5500) ni 'off'."
+  echo "Error: '$ARG1' is not a valid 6-digit hex color (e.g. #FF5500) or 'off'."
   exit 1
 fi
 
 ALPHA="${2:-1.0}"
 if ! awk "BEGIN { exit !($ALPHA >= 0.05 && $ALPHA <= 1.0) }"; then
-  echo "Error: la opacidad debe estar entre 0.05 y 1.0 (valor recibido: $ALPHA)."
+  echo "Error: opacity must be between 0.05 and 1.0 (received: $ALPHA)."
   exit 1
 fi
 
@@ -89,7 +89,7 @@ B_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[5,6]})) / 255 }")
 
 mkdir -p "$BIN_DIR"
 if [ ! -x "$BIN_PATH" ] || [ "$SWIFT_SRC" -nt "$BIN_PATH" ]; then
-  echo "Compilando overlay nativo en $BIN_PATH..."
+  echo "Compiling native overlay to $BIN_PATH..."
   swiftc -O "$SWIFT_SRC" -o "$BIN_PATH"
 fi
 
@@ -97,11 +97,11 @@ stop_overlay "false"
 write_launch_agent "$R_FLOAT" "$G_FLOAT" "$B_FLOAT" "$ALPHA"
 
 if launchctl bootstrap "$GUI_DOMAIN" "$PLIST_PATH" 2>/dev/null; then
-  echo "Capa aplicada en la barra de menús (#${HEX:u}, opacidad $ALPHA) y configurada para iniciar al arrancar macOS."
+  echo "Menu bar tint applied (#${HEX:u}, opacity $ALPHA) and enabled at login."
 else
   nohup "$BIN_PATH" "$R_FLOAT" "$G_FLOAT" "$B_FLOAT" "$ALPHA" >/dev/null 2>&1 &
   echo $! > "$PID_FILE"
-  echo "Capa aplicada (#${HEX:u}, opacidad $ALPHA). LaunchAgent guardado en $PLIST_PATH para el próximo inicio."
+  echo "Menu bar tint applied (#${HEX:u}, opacity $ALPHA). LaunchAgent saved to $PLIST_PATH for next login."
 fi
 
-echo "Para quitarla y desactivar el inicio automático: ${0:t} off"
+echo "To remove the overlay and disable auto-start: ${0:t} off"
