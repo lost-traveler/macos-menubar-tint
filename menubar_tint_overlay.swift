@@ -1,8 +1,10 @@
 import AppKit
+import CoreGraphics
 import CoreImage
 
 final class OverlayController: NSObject {
-    private var windows: [NSWindow] = []
+    private var windows: [CGDirectDisplayID: NSWindow] = [:]
+    private var backdropLayers: [CGDirectDisplayID: CALayer] = [:]
     private let r: CGFloat
     private let g: CGFloat
     private let b: CGFloat
@@ -15,16 +17,39 @@ final class OverlayController: NSObject {
         self.alpha = alpha
         super.init()
         rebuildWindows()
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+
+        let wsnc = NSWorkspace.shared.notificationCenter
+        wsnc.addObserver(
+            self,
+            selector: #selector(spaceOrAppChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+        wsnc.addObserver(
+            self,
+            selector: #selector(spaceOrAppChanged),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
     }
 
     @objc private func screensChanged() {
         rebuildWindows()
+    }
+
+    @objc private func spaceOrAppChanged() {
+        updateVisibilityForAllScreens()
+        // Re-verifica tras la animación de cambio de Space o clic en escritorio
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.updateVisibilityForAllScreens()
+        }
     }
 
     private func makeMultiplyFilter() -> Any? {
@@ -37,11 +62,77 @@ final class OverlayController: NSObject {
         return CIFilter(name: "CIMultiplyBlendMode")
     }
 
+    private func displayID(for screen: NSScreen) -> CGDirectDisplayID {
+        return (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+    }
+
+    private func isScreenInFullscreen(_ screen: NSScreen) -> Bool {
+        let fullFrame = screen.frame
+        let visibleFrame = screen.visibleFrame
+
+        // Si la barra de menús está oculta en esta pantalla (pantalla completa o auto-ocultar activo)
+        if (fullFrame.maxY - visibleFrame.maxY) < 1.0 {
+            return true
+        }
+
+        // Convierte las coordenadas de AppKit (origen abajo-izquierda) a CoreGraphics (origen arriba-izquierda)
+        guard let mainScreen = NSScreen.screens.first else { return false }
+        let mainHeight = mainScreen.frame.height
+        let cgScreenRect = CGRect(
+            x: fullFrame.minX,
+            y: mainHeight - fullFrame.maxY,
+            width: fullFrame.width,
+            height: fullFrame.height
+        )
+
+        guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+
+        for info in infoList {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
+                continue
+            }
+            if abs(bounds.origin.x - cgScreenRect.origin.x) <= 2,
+               abs(bounds.origin.y - cgScreenRect.origin.y) <= 2,
+               abs(bounds.width - cgScreenRect.width) <= 2,
+               abs(bounds.height - cgScreenRect.height) <= 2 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func updateVisibilityForAllScreens() {
+        for screen in NSScreen.screens {
+            let did = displayID(for: screen)
+            guard let window = windows[did] else { continue }
+
+            if isScreenInFullscreen(screen) {
+                if window.isVisible {
+                    window.orderOut(nil)
+                }
+            } else {
+                window.orderFrontRegardless()
+                if let backdrop = backdropLayers[did] {
+                    if backdrop.responds(to: NSSelectorFromString("setEnabled:")) {
+                        backdrop.setValue(true, forKey: "enabled")
+                    }
+                    backdrop.setNeedsDisplay()
+                }
+            }
+        }
+    }
+
     private func rebuildWindows() {
-        for w in windows {
+        for (_, w) in windows {
             w.orderOut(nil)
         }
         windows.removeAll()
+        backdropLayers.removeAll()
 
         guard let backdropClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
             fputs("Error: CABackdropLayer no está disponible en esta versión de macOS.\n", stderr)
@@ -51,6 +142,7 @@ final class OverlayController: NSObject {
         let menuBarLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
 
         for screen in NSScreen.screens {
+            let did = displayID(for: screen)
             let fullFrame = screen.frame
             let visibleFrame = screen.visibleFrame
             let topInset = fullFrame.maxY - visibleFrame.maxY
@@ -78,8 +170,7 @@ final class OverlayController: NSObject {
             window.collectionBehavior = [
                 .canJoinAllSpaces,
                 .stationary,
-                .ignoresCycle,
-                .fullScreenAuxiliary
+                .ignoresCycle
             ]
 
             if window.responds(to: NSSelectorFromString("setShouldAutoFlattenLayerTree:")) {
@@ -104,6 +195,15 @@ final class OverlayController: NSObject {
             if backdropLayer.responds(to: NSSelectorFromString("setWindowServerAware:")) {
                 backdropLayer.setValue(true, forKey: "windowServerAware")
             }
+            if backdropLayer.responds(to: NSSelectorFromString("setIgnoresOffscreenGroups:")) {
+                backdropLayer.setValue(true, forKey: "ignoresOffscreenGroups")
+            }
+            if backdropLayer.responds(to: NSSelectorFromString("setAllowsGroupBlending:")) {
+                backdropLayer.setValue(true, forKey: "allowsGroupBlending")
+            }
+            if backdropLayer.responds(to: NSSelectorFromString("setDisablesOccludedBackdropBlurs:")) {
+                backdropLayer.setValue(false, forKey: "disablesOccludedBackdropBlurs")
+            }
 
             let tintLayer = CALayer()
             tintLayer.frame = rootLayer.bounds
@@ -125,9 +225,11 @@ final class OverlayController: NSObject {
             rootLayer.addSublayer(tintLayer)
 
             window.contentView = contentView
-            window.orderFrontRegardless()
-            windows.append(window)
+            windows[did] = window
+            backdropLayers[did] = backdropLayer
         }
+
+        updateVisibilityForAllScreens()
     }
 }
 
