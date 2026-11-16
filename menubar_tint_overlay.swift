@@ -5,6 +5,8 @@ import CoreImage
 final class OverlayController: NSObject {
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private var backdropLayers: [CGDirectDisplayID: CALayer] = [:]
+    private var hiddenState: [CGDirectDisplayID: Bool] = [:]
+    private var pollTimer: Timer?
     private let r: CGFloat
     private let g: CGFloat
     private let b: CGFloat
@@ -38,6 +40,11 @@ final class OverlayController: NSObject {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+
+        // Detecta Mission Control / Exposé sin esperar notificaciones de cambio de Space
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            self?.updateVisibilityForAllScreens(forceRefresh: false)
+        }
     }
 
     @objc private func screensChanged() {
@@ -45,10 +52,9 @@ final class OverlayController: NSObject {
     }
 
     @objc private func spaceOrAppChanged() {
-        updateVisibilityForAllScreens()
-        // Re-verifica tras la animación de cambio de Space o clic en escritorio
+        updateVisibilityForAllScreens(forceRefresh: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.updateVisibilityForAllScreens()
+            self?.updateVisibilityForAllScreens(forceRefresh: true)
         }
     }
 
@@ -66,16 +72,16 @@ final class OverlayController: NSObject {
         return (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
     }
 
-    private func isScreenInFullscreen(_ screen: NSScreen) -> Bool {
+    private func shouldHideOverlay(for screen: NSScreen) -> Bool {
         let fullFrame = screen.frame
         let visibleFrame = screen.visibleFrame
 
-        // Si la barra de menús está oculta en esta pantalla (pantalla completa o auto-ocultar activo)
+        // 1. Barra de menús oculta (pantalla completa o auto-ocultar)
         if (fullFrame.maxY - visibleFrame.maxY) < 1.0 {
             return true
         }
 
-        // Convierte las coordenadas de AppKit (origen abajo-izquierda) a CoreGraphics (origen arriba-izquierda)
+        // Convierte coordenadas de AppKit (abajo-izquierda) a CoreGraphics (arriba-izquierda)
         guard let mainScreen = NSScreen.screens.first else { return false }
         let mainHeight = mainScreen.frame.height
         let cgScreenRect = CGRect(
@@ -85,20 +91,33 @@ final class OverlayController: NSObject {
             height: fullFrame.height
         )
 
-        guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return false
         }
 
         for info in infoList {
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+            guard let layer = info[kCGWindowLayer as String] as? Int,
                   let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
                 continue
             }
-            if abs(bounds.origin.x - cgScreenRect.origin.x) <= 2,
+
+            // 2. Ventana de app en pantalla completa (nivel normal cubriendo toda la pantalla)
+            if layer == 0,
+               abs(bounds.origin.x - cgScreenRect.origin.x) <= 2,
                abs(bounds.origin.y - cgScreenRect.origin.y) <= 2,
                abs(bounds.width - cgScreenRect.width) <= 2,
                abs(bounds.height - cgScreenRect.height) <= 2 {
+                return true
+            }
+
+            // 3. Mission Control / Exposé (Dock dibuja una ventana superpuesta de pantalla completa con layer > 0)
+            if let owner = info[kCGWindowOwnerName as String] as? String,
+               owner == "Dock",
+               layer > 0,
+               bounds.intersects(cgScreenRect),
+               bounds.width >= cgScreenRect.width * 0.85,
+               bounds.height >= cgScreenRect.height * 0.85 {
                 return true
             }
         }
@@ -106,22 +125,29 @@ final class OverlayController: NSObject {
         return false
     }
 
-    private func updateVisibilityForAllScreens() {
+    private func updateVisibilityForAllScreens(forceRefresh: Bool) {
         for screen in NSScreen.screens {
             let did = displayID(for: screen)
             guard let window = windows[did] else { continue }
 
-            if isScreenInFullscreen(screen) {
-                if window.isVisible {
+            let shouldHide = shouldHideOverlay(for: screen)
+            let wasHidden = hiddenState[did]
+
+            if shouldHide {
+                if wasHidden != true || window.isVisible {
                     window.orderOut(nil)
+                    hiddenState[did] = true
                 }
             } else {
-                window.orderFrontRegardless()
-                if let backdrop = backdropLayers[did] {
-                    if backdrop.responds(to: NSSelectorFromString("setEnabled:")) {
-                        backdrop.setValue(true, forKey: "enabled")
+                if wasHidden != false || !window.isVisible || forceRefresh {
+                    window.orderFrontRegardless()
+                    if let backdrop = backdropLayers[did] {
+                        if backdrop.responds(to: NSSelectorFromString("setEnabled:")) {
+                            backdrop.setValue(true, forKey: "enabled")
+                        }
+                        backdrop.setNeedsDisplay()
                     }
-                    backdrop.setNeedsDisplay()
+                    hiddenState[did] = false
                 }
             }
         }
@@ -133,6 +159,7 @@ final class OverlayController: NSObject {
         }
         windows.removeAll()
         backdropLayers.removeAll()
+        hiddenState.removeAll()
 
         guard let backdropClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
             fputs("Error: CABackdropLayer no está disponible en esta versión de macOS.\n", stderr)
@@ -229,7 +256,7 @@ final class OverlayController: NSObject {
             backdropLayers[did] = backdropLayer
         }
 
-        updateVisibilityForAllScreens()
+        updateVisibilityForAllScreens(forceRefresh: true)
     }
 }
 
