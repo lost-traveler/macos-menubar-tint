@@ -1,5 +1,18 @@
 # Changelog
 
+## [v1.1.0] - 2026-11-17
+
+### Fixed
+- **Mission Control Opening Animation Flash:** Reduced visibility poll interval to `50 ms` and added detection for the top `Dock` Spaces bar so the overlay hides immediately before Mission Control's opening animation begins.
+- **Vertical Multi-Display Coordinate Mapping:** `cgRect(for:)` now explicitly uses the primary display (`frame.origin == .zero`) as the coordinate reference when translating AppKit frames to CoreGraphics, preventing fullscreen/overlay mismatches when displays are stacked vertically.
+- **Screen Saver & Lock Screen Handling:** Subscribed to `DistributedNotificationCenter` (`com.apple.screenIsLocked`, `com.apple.screenIsUnlocked`, `com.apple.screensaver.didstart`, `com.apple.screensaver.didstop`) plus `ScreenSaverEngine` window checks to hide the overlay while locked or running a screen saver.
+- **Screenshot Selection UI (`screencaptureui`):** Automatically hides the overlay while macOS screenshot/recording selection UI is active on screen.
+- **Wake from Sleep Display Rebuilds:** Listens to `NSWorkspace.didWakeNotification` and rebuilds overlay windows after a `0.6s` delay so displays and `visibleFrame` geometry settle cleanly.
+- **iCloud Drive Dataless Source Handling:** `menubar_tint.zsh` now invokes `brctl download` when stored in iCloud Drive to ensure `menubar_tint_overlay.swift` is downloaded locally before compiling.
+
+### Improved
+- **Tiling Window Manager & Auto-Hide Menu Bar Mitigation:** Visibility detection now checks for the active `Window Server` `Menubar` strip (`layer == 24`) instead of relying solely on `layer == 0` full-screen window bounds, reducing false hides with tiling window managers and improving behavior when the menu bar auto-hides.
+
 ## [v1.03.1] - 2026-11-16
 
 ### Changed
