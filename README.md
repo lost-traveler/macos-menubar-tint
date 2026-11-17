@@ -1,4 +1,4 @@
-# macos-menubar-tint
+# menubar-tint
 
 <img width="1408" height="881" alt="screen" src="https://github.com/user-attachments/assets/5cd9e6bd-cbd1-40e8-9ba6-c4fe4f78cca6" />
 
