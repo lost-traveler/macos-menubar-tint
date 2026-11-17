@@ -1,10 +1,19 @@
 import AppKit
+import Carbon.HIToolbox
 import CoreGraphics
 import CoreImage
+import ImageIO
+
+enum TintMode: String {
+    case auto
+    case dark
+    case light
+}
 
 final class OverlayController: NSObject {
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private var backdropLayers: [CGDirectDisplayID: CALayer] = [:]
+    private var tintLayers: [CGDirectDisplayID: CALayer] = [:]
     private var hiddenState: [CGDirectDisplayID: Bool] = [:]
     private var isScreenLockedOrSaver = false
     private var pollTimer: Timer?
@@ -12,12 +21,14 @@ final class OverlayController: NSObject {
     private let g: CGFloat
     private let b: CGFloat
     private let alpha: CGFloat
+    private let mode: TintMode
 
-    init(r: CGFloat, g: CGFloat, b: CGFloat, alpha: CGFloat) {
+    init(r: CGFloat, g: CGFloat, b: CGFloat, alpha: CGFloat, mode: TintMode) {
         self.r = r
         self.g = g
         self.b = b
         self.alpha = alpha
+        self.mode = mode
         super.init()
         rebuildWindows()
 
@@ -73,6 +84,12 @@ final class OverlayController: NSObject {
             name: NSNotification.Name("com.apple.screensaver.didstop"),
             object: nil
         )
+        dnc.addObserver(
+            self,
+            selector: #selector(interfaceThemeChanged),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil
+        )
 
         // Lightweight state poll (50ms) for Mission Control / Exposé and auto-hide menu bar
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -100,21 +117,114 @@ final class OverlayController: NSObject {
         updateVisibilityForAllScreens(forceRefresh: true)
     }
 
+    @objc private func interfaceThemeChanged() {
+        updateBlendModesForAllScreens()
+    }
+
     @objc private func spaceOrAppChanged() {
+        updateBlendModesForAllScreens()
         updateVisibilityForAllScreens(forceRefresh: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.updateVisibilityForAllScreens(forceRefresh: true)
         }
     }
 
-    private func makeMultiplyFilter() -> Any? {
+    private func isSystemDarkMode() -> Bool {
+        return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
+
+    private func topStripLuminance(for screen: NSScreen) -> Double? {
+        guard let url = NSWorkspace.shared.desktopImageURL(for: screen) else {
+            return nil
+        }
+
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
+            return nil
+        }
+
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else {
+            return nil
+        }
+
+        let thumbOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 64,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+        guard let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else {
+            return nil
+        }
+
+        let stripHeight = max(1, thumb.height / 10)
+        guard let topStrip = thumb.cropping(to: CGRect(x: 0, y: 0, width: thumb.width, height: stripHeight)) else {
+            return nil
+        }
+
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(
+                  data: &pixel,
+                  width: 1,
+                  height: 1,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 4,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            return nil
+        }
+
+        ctx.interpolationQuality = .medium
+        ctx.draw(topStrip, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+
+        let pr = Double(pixel[0]) / 255.0
+        let pg = Double(pixel[1]) / 255.0
+        let pb = Double(pixel[2]) / 255.0
+        return 0.2126 * pr + 0.7152 * pg + 0.0722 * pb
+    }
+
+    private func resolvedFilterType(for screen: NSScreen) -> (caName: String, ciName: String) {
+        let useDarkMultiply: Bool
+        switch mode {
+        case .dark:
+            useDarkMultiply = true
+        case .light:
+            useDarkMultiply = false
+        case .auto:
+            if let lum = topStripLuminance(for: screen) {
+                useDarkMultiply = lum < 0.5
+            } else {
+                useDarkMultiply = isSystemDarkMode()
+            }
+        }
+
+        if useDarkMultiply {
+            return ("multiplyBlendMode", "CIMultiplyBlendMode")
+        } else {
+            return ("screenBlendMode", "CIScreenBlendMode")
+        }
+    }
+
+    private func makeBlendFilter(for screen: NSScreen) -> Any? {
+        let filterNames = resolvedFilterType(for: screen)
         if let caFilterClass = NSClassFromString("CAFilter") as? NSObject.Type {
             let sel = NSSelectorFromString("filterWithType:")
             if caFilterClass.responds(to: sel) {
-                return caFilterClass.perform(sel, with: "multiplyBlendMode")?.takeUnretainedValue()
+                return caFilterClass.perform(sel, with: filterNames.caName)?.takeUnretainedValue()
             }
         }
-        return CIFilter(name: "CIMultiplyBlendMode")
+        return CIFilter(name: filterNames.ciName)
+    }
+
+    private func updateBlendModesForAllScreens() {
+        guard mode == .auto else { return }
+        for screen in NSScreen.screens {
+            let did = displayID(for: screen)
+            guard let tintLayer = tintLayers[did] else { continue }
+            tintLayer.compositingFilter = makeBlendFilter(for: screen)
+        }
     }
 
     private func displayID(for screen: NSScreen) -> CGDirectDisplayID {
@@ -134,7 +244,7 @@ final class OverlayController: NSObject {
     }
 
     private func shouldHideOverlay(for screen: NSScreen, infoList: [[String: Any]]) -> Bool {
-        if isScreenLockedOrSaver {
+        if isScreenLockedOrSaver || IsSecureEventInputEnabled() {
             return true
         }
 
@@ -239,6 +349,7 @@ final class OverlayController: NSObject {
         }
         windows.removeAll()
         backdropLayers.removeAll()
+        tintLayers.removeAll()
         hiddenState.removeAll()
 
         guard let backdropClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
@@ -311,12 +422,15 @@ final class OverlayController: NSObject {
             if backdropLayer.responds(to: NSSelectorFromString("setDisablesOccludedBackdropBlurs:")) {
                 backdropLayer.setValue(false, forKey: "disablesOccludedBackdropBlurs")
             }
+            if backdropLayer.responds(to: NSSelectorFromString("setAllowsSubstituteColor:")) {
+                backdropLayer.setValue(true, forKey: "allowsSubstituteColor")
+            }
 
             let tintLayer = CALayer()
             tintLayer.frame = rootLayer.bounds
             tintLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             tintLayer.backgroundColor = CGColor(srgbRed: r, green: g, blue: b, alpha: alpha)
-            tintLayer.compositingFilter = makeMultiplyFilter()
+            tintLayer.compositingFilter = makeBlendFilter(for: screen)
 
             // Keep layer tree active on GPU to prevent WindowServer from flattening after ~1s of inactivity
             let keepAlive = CABasicAnimation(keyPath: "opacity")
@@ -334,6 +448,7 @@ final class OverlayController: NSObject {
             window.contentView = contentView
             windows[did] = window
             backdropLayers[did] = backdropLayer
+            tintLayers[did] = tintLayer
         }
 
         updateVisibilityForAllScreens(forceRefresh: true)
@@ -344,14 +459,24 @@ guard CommandLine.arguments.count >= 4,
       let r = Double(CommandLine.arguments[1]),
       let g = Double(CommandLine.arguments[2]),
       let b = Double(CommandLine.arguments[3]) else {
-    fputs("Usage: menubar_tint_overlay <r> <g> <b> [alpha]\n", stderr)
+    fputs("Usage: menubar_tint_overlay <r> <g> <b> [alpha] [auto|dark|light]\n", stderr)
     exit(1)
 }
 
 let alpha = CommandLine.arguments.count >= 5 ? (Double(CommandLine.arguments[4]) ?? 1.0) : 1.0
+let modeArg = CommandLine.arguments.count >= 6 ? CommandLine.arguments[5].lowercased() : "auto"
+let mode: TintMode
+switch modeArg {
+case "dark", "multiply":
+    mode = .dark
+case "light", "screen":
+    mode = .light
+default:
+    mode = .auto
+}
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let controller = OverlayController(r: r, g: g, b: b, alpha: alpha)
+let controller = OverlayController(r: r, g: g, b: b, alpha: alpha, mode: mode)
 _ = controller
 app.run()

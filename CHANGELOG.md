@@ -1,5 +1,14 @@
 # Changelog
 
+## [v2.0.0] - 2026-11-17
+
+### Added
+- **Light Mode & `screenBlendMode` Support:** Added support for Light Mode and bright menu bar backgrounds using `screenBlendMode`, tinting black text and icons while leaving pure white backgrounds untouched.
+- **Hybrid Wallpaper & Appearance Detection (`auto` Mode):** When no mode is specified (or `auto` is selected), the overlay samples the top 10% strip of each display's static wallpaper via `ImageIO` to measure luminance (`< 0.5` selects `multiplyBlendMode`, `>= 0.5` selects `screenBlendMode`), falling back to `AppleInterfaceStyle` and dynamically updating on theme or Space changes.
+- **Interactive Mode Prompt & Optional CLI Flags:** Running `./menubar_tint.zsh` without arguments now walks through hex color, opacity, and blend mode selection (`auto`, `dark`, `light`) with explanations of each mode's ideal use case. CLI arguments also accept `auto`/`dark`/`light` (or `--auto`, `--dark`, `--light`, `--mode <mode>`), while passing only a hex code defaults to `auto`.
+- **Secure Input Auto-Hide:** Integrated `IsSecureEventInputEnabled()` (`Carbon.HIToolbox`) to automatically hide the overlay while password fields or Secure Keyboard Entry are active, restoring it immediately afterward.
+- **DRM Backdrop Fallback:** Enabled `allowsSubstituteColor = true` on `CABackdropLayer` to prevent harsh solid/black artifacts when WindowServer restricts live sampling over DRM-protected content.
+
 ## [v1.1.0] - 2026-11-17
 
 ### Fixed
