@@ -1,7 +1,6 @@
 # menubar-tint
 
-<img width="1408" height="881" alt="screen" src="https://github.com/user-attachments/assets/5cd9e6bd-cbd1-40e8-9ba6-c4fe4f78cca6" />
-
+<img width="1408" height="881" alt="screen" src="https://github.com/user-attachments/assets/2221f398-59dc-4e12-bf0f-5417a2776472" />
 
 A lightweight macOS command-line utility and native Swift overlay that tints the menu bar's white text and icons with any arbitrary hexadecimal color (`#RRGGBB`), without replacing the native macOS menu bar.
 
