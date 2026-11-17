@@ -270,11 +270,13 @@ final class OverlayController: NSObject {
                 return true
             }
 
-            // Mission Control / Exposé (Dock renders full-screen overlay or top Spaces bar at layer > 0)
+            // Mission Control / Exposé (ignore Dock layer >= 20 used by auto-hide Dock)
+            let winAlpha = info[kCGWindowAlpha as String] as? Double ?? 1.0
             if owner == "Dock",
                layer > 0,
+               winAlpha > 0.01,
                bounds.intersects(cgScreenRect),
-               ((bounds.width >= cgScreenRect.width * 0.85 && bounds.height >= cgScreenRect.height * 0.85) ||
+               ((layer < 20 && bounds.width >= cgScreenRect.width * 0.85 && bounds.height >= cgScreenRect.height * 0.85) ||
                 (bounds.minY <= cgScreenRect.minY + 5 && bounds.width >= cgScreenRect.width * 0.5 && bounds.height >= 40 && bounds.height <= 250)) {
                 return true
             }
@@ -423,7 +425,7 @@ final class OverlayController: NSObject {
                 backdropLayer.setValue(false, forKey: "disablesOccludedBackdropBlurs")
             }
             if backdropLayer.responds(to: NSSelectorFromString("setAllowsSubstituteColor:")) {
-                backdropLayer.setValue(true, forKey: "allowsSubstituteColor")
+                backdropLayer.setValue(false, forKey: "allowsSubstituteColor")
             }
 
             let tintLayer = CALayer()
