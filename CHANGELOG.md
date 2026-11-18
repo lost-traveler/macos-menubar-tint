@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.02] - 2026-11-16
+
+### Fixed
+- **Mission Control / Exposé Auto-Hide:** Added lightweight detection for `Dock` full-screen overlay windows (`CGWindowListCopyWindowInfo`) so the menu bar tint automatically hides while Mission Control or Exposé is open and restores immediately upon exiting.
+
 ## [v1.01] - 2026-11-16
 
 ### Fixed
