@@ -8,9 +8,10 @@ A lightweight macOS command-line utility and native Swift overlay that tints the
 
 macOS does not expose a public setting or API to customize the color of menu bar text and icons directly. This tool solves that by placing a borderless, click-through (`ignoresMouseEvents = true`) `NSWindow` overlay directly over the menu bar on all connected displays:
 
-- **Multiply Blend Mode (`CABackdropLayer` + `CAFilter`):** Uses Core Animation's `multiplyBlendMode` compositing filter so that pure white pixels (`1.0, 1.0, 1.0`) take on your exact target hex color while pure black pixels (`0.0, 0.0, 0.0`) remain untouched.
+- **Adaptive Blend Modes (`CABackdropLayer` + `CAFilter`):** Uses `multiplyBlendMode` in dark setups (tinting white text/icons while keeping pure black untouched) and `screenBlendMode` in light setups (tinting black text/icons while keeping pure white untouched).
+- **Hybrid Wallpaper & Theme Detection (`auto`):** Samples the top 10% strip of each display's static wallpaper via `ImageIO` (falling back to macOS `AppleInterfaceStyle`) to pick the right blend mode automatically.
 - **WindowServer Keep-Alive:** Includes an imperceptible GPU opacity animation (`0.996` to `1.0`) on the tint layer to prevent WindowServer from auto-flattening the backdrop layer tree after ~1 second of inactivity.
-- **Smart Auto-Hide & Multi-Display:** Automatically hides during native fullscreen apps and Mission Control / Exposé, and adapts when displays are connected or disconnected.
+- **Smart Auto-Hide & Multi-Display:** Automatically hides during native fullscreen apps, Mission Control / Exposé, Lock Screen / Screen Savers, and Secure Input password prompts, and adapts when displays are connected or disconnected.
 - **Auto-Start on Login:** Registers a `LaunchAgent` so your chosen tint persists across reboots.
 
 > **Tip for Best Results:** Use **Dark Mode** with a pure black menu bar background (e.g., by enabling *Reduce Transparency* in Accessibility → Display, or using a wallpaper with a black top strip). Because Multiply blends against everything behind the menu bar, any non-black background behind the bar will also be tinted.
@@ -39,11 +40,15 @@ Pass any 6-digit hex color (with or without `#`), or run the script without argu
 ./menubar_tint.zsh "#FF5500"
 ```
 
-You can also pass an optional opacity/intensity value between `0.05` and `1.0` (defaults to `1.0`):
+When only a hex color is provided, `auto` mode is used automatically. You can also pass an optional opacity (`0.05`–`1.0`, default `1.0`) and/or a blend mode (`auto`, `dark`/`multiply`, `light`/`screen`, or `--mode <mode>`):
 
 ```zsh
 ./menubar_tint.zsh "#00E5FF" 0.85
+./menubar_tint.zsh "#00E5FF" 0.85 light
+./menubar_tint.zsh "#FF5500" --dark
 ```
+
+Running `./menubar_tint.zsh` with no arguments starts an interactive prompt explaining each mode (`auto`, `dark`, `light`) so you can pick the best fit.
 
 On the first run, `menubar_tint.zsh` compiles `menubar_tint_overlay.swift` into `~/.local/bin/menubar_tint_overlay` (so it persists across reboots) and creates a `LaunchAgent` (`~/Library/LaunchAgents/com.macos.menubar-tint.plist`) to apply your chosen color automatically on login. Subsequent color changes reuse the compiled binary and update immediately.
 
