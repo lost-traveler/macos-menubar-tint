@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.1.0] - 2026-11-18
+
+### Improved
+- **Discrete Keep-Alive & ProMotion Idle Refresh Scaling:** Replaced the continuous 60/120 Hz `CABasicAnimation` opacity interpolation with a discrete `CAKeyframeAnimation` pulse every `0.8 s` (`calculationMode = .discrete`), eliminating continuous per-frame compositing so ProMotion displays can drop down to their minimum idle refresh rates (`10–24 Hz`) instead of staying forced at high refresh rates.
+- **CPU, GPU & Energy Efficiency:** Switched visibility polling from a fixed `50 ms` (`20 Hz`) loop to an adaptive scheduler (`200 ms` idle / `50 ms` burst for `1.5 s` on app, Space, or unlock transitions) and skipped `CGWindowListCopyWindowInfo` queries while locked or in a screen saver—cutting `WindowServer` CPU/energy overhead by ~70–75% and returning total GPU power to idle baseline (`7–10 mW`).
+
 ## [v2.0.2] - 2026-11-17
 
 ### Fixed

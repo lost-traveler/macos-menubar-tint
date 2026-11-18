@@ -11,7 +11,7 @@ macOS does not expose a public setting or API to customize the color of menu bar
 
 - **Adaptive Blend Modes (`CABackdropLayer` + `CAFilter`):** Uses `multiplyBlendMode` in dark setups (tinting white text/icons while keeping pure black untouched) and `screenBlendMode` in light setups (tinting black text/icons while keeping pure white untouched).
 - **Hybrid Wallpaper & Theme Detection (`auto`):** Samples the top 10% strip of each display's static wallpaper via `ImageIO` (falling back to macOS `AppleInterfaceStyle`) to pick the right blend mode automatically.
-- **WindowServer Keep-Alive:** Includes an imperceptible GPU opacity animation (`0.996` to `1.0`) on the tint layer to prevent WindowServer from auto-flattening the backdrop layer tree after ~1 second of inactivity.
+- **WindowServer Keep-Alive (ProMotion-Friendly):** Uses a discrete 0.8 s GPU opacity pulse (`0.996` / `1.0`) instead of continuous 60/120 Hz animation, preventing WindowServer from auto-flattening the backdrop layer tree after ~1 second while allowing ProMotion displays to drop to their minimum idle refresh rates.
 - **Smart Auto-Hide & Multi-Display:** Automatically hides during native fullscreen apps, Mission Control / Exposé, Lock Screen / Screen Savers, and Secure Input password prompts, and adapts when displays are connected or disconnected.
 - **Auto-Start on Login:** Registers a `LaunchAgent` so your chosen tint persists across reboots.
 

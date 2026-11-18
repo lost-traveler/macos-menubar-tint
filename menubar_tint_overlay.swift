@@ -17,6 +17,10 @@ final class OverlayController: NSObject {
     private var hiddenState: [CGDirectDisplayID: Bool] = [:]
     private var isScreenLockedOrSaver = false
     private var pollTimer: Timer?
+    private var currentPollInterval: TimeInterval = 0.20
+    private var burstUntil: Date = .distantPast
+    private let idlePollInterval: TimeInterval = 0.20
+    private let fastPollInterval: TimeInterval = 0.05
     private let r: CGFloat
     private let g: CGFloat
     private let b: CGFloat
@@ -91,9 +95,35 @@ final class OverlayController: NSObject {
             object: nil
         )
 
-        // Lightweight state poll (50ms) for Mission Control / Exposé and auto-hide menu bar
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.updateVisibilityForAllScreens(forceRefresh: false)
+        schedulePollTimer(interval: idlePollInterval)
+    }
+
+    private func schedulePollTimer(interval: TimeInterval) {
+        if pollTimer != nil && abs(currentPollInterval - interval) < 0.001 {
+            return
+        }
+        pollTimer?.invalidate()
+        currentPollInterval = interval
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.handlePollTick()
+        }
+        timer.tolerance = interval * 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
+
+    private func triggerFastPollBurst(duration: TimeInterval = 1.5) {
+        let target = Date().addingTimeInterval(duration)
+        if target > burstUntil {
+            burstUntil = target
+        }
+        schedulePollTimer(interval: fastPollInterval)
+    }
+
+    private func handlePollTick() {
+        updateVisibilityForAllScreens(forceRefresh: false)
+        if currentPollInterval < idlePollInterval && Date() >= burstUntil {
+            schedulePollTimer(interval: idlePollInterval)
         }
     }
 
@@ -114,6 +144,7 @@ final class OverlayController: NSObject {
 
     @objc private func screenUnlockedOrSaverStopped() {
         isScreenLockedOrSaver = false
+        triggerFastPollBurst()
         updateVisibilityForAllScreens(forceRefresh: true)
     }
 
@@ -122,6 +153,7 @@ final class OverlayController: NSObject {
     }
 
     @objc private func spaceOrAppChanged() {
+        triggerFastPollBurst()
         updateBlendModesForAllScreens()
         updateVisibilityForAllScreens(forceRefresh: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -326,6 +358,18 @@ final class OverlayController: NSObject {
     }
 
     private func updateVisibilityForAllScreens(forceRefresh: Bool) {
+        if isScreenLockedOrSaver {
+            for screen in NSScreen.screens {
+                let did = displayID(for: screen)
+                guard let window = windows[did] else { continue }
+                if hiddenState[did] != true || window.isVisible {
+                    window.orderOut(nil)
+                    hiddenState[did] = true
+                }
+            }
+            return
+        }
+
         let infoList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
 
         for screen in NSScreen.screens {
@@ -444,12 +488,12 @@ final class OverlayController: NSObject {
             tintLayer.backgroundColor = CGColor(srgbRed: r, green: g, blue: b, alpha: alpha)
             tintLayer.compositingFilter = makeBlendFilter(for: screen)
 
-            // Keep layer tree active on GPU to prevent WindowServer from flattening after ~1s of inactivity
-            let keepAlive = CABasicAnimation(keyPath: "opacity")
-            keepAlive.fromValue = 0.996
-            keepAlive.toValue = 1.0
-            keepAlive.duration = 0.45
-            keepAlive.autoreverses = true
+            // Discrete pulse every 0.8s (instead of 60/120Hz interpolation) to prevent WindowServer flattening while minimizing CPU/energy
+            let keepAlive = CAKeyframeAnimation(keyPath: "opacity")
+            keepAlive.values = [0.996, 1.0]
+            keepAlive.keyTimes = [0.0, 0.5]
+            keepAlive.duration = 1.6
+            keepAlive.calculationMode = .discrete
             keepAlive.repeatCount = .infinity
             keepAlive.isRemovedOnCompletion = false
             tintLayer.add(keepAlive, forKey: "keepAlive")
