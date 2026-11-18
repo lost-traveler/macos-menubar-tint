@@ -6,7 +6,6 @@
 - **Mission Control Opening Animation Flash:** Reduced visibility poll interval to `50 ms` and added detection for the top `Dock` Spaces bar so the overlay hides immediately before Mission Control's opening animation begins.
 - **Vertical Multi-Display Coordinate Mapping:** `cgRect(for:)` now explicitly uses the primary display (`frame.origin == .zero`) as the coordinate reference when translating AppKit frames to CoreGraphics, preventing fullscreen/overlay mismatches when displays are stacked vertically.
 - **Screen Saver & Lock Screen Handling:** Subscribed to `DistributedNotificationCenter` (`com.apple.screenIsLocked`, `com.apple.screenIsUnlocked`, `com.apple.screensaver.didstart`, `com.apple.screensaver.didstop`) plus `ScreenSaverEngine` window checks to hide the overlay while locked or running a screen saver.
-- **Screenshot Selection UI (`screencaptureui`):** Automatically hides the overlay while macOS screenshot/recording selection UI is active on screen.
 - **Wake from Sleep Display Rebuilds:** Listens to `NSWorkspace.didWakeNotification` and rebuilds overlay windows after a `0.6s` delay so displays and `visibleFrame` geometry settle cleanly.
 - **iCloud Drive Dataless Source Handling:** `menubar_tint.zsh` now invokes `brctl download` when stored in iCloud Drive to ensure `menubar_tint_overlay.swift` is downloaded locally before compiling.
 

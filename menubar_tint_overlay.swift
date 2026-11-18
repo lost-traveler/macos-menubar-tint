@@ -74,7 +74,7 @@ final class OverlayController: NSObject {
             object: nil
         )
 
-        // Lightweight state poll (50ms) for Mission Control / Exposé, screencaptureui, and auto-hide menu bar
+        // Lightweight state poll (50ms) for Mission Control / Exposé and auto-hide menu bar
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.updateVisibilityForAllScreens(forceRefresh: false)
         }
@@ -154,12 +154,6 @@ final class OverlayController: NSObject {
             }
 
             let owner = info[kCGWindowOwnerName as String] as? String ?? ""
-
-            // Screenshot selection UI active on this screen
-            if (owner == "screencaptureui" || owner == "Screenshot"),
-               bounds.intersects(cgScreenRect) {
-                return true
-            }
 
             // ScreenSaverEngine fallback
             if owner == "ScreenSaverEngine", bounds.intersects(cgScreenRect) {
