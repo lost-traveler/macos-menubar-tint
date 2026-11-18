@@ -53,13 +53,13 @@ Running `./menubar_tint.zsh` with no arguments starts an interactive prompt expl
 
 On the first run, `menubar_tint.zsh` compiles `menubar_tint_overlay.swift` into `~/.local/bin/menubar_tint_overlay` (so it persists across reboots) and creates a `LaunchAgent` (`~/Library/LaunchAgents/com.macos.menubar-tint.plist`) to apply your chosen color automatically on login. Subsequent color changes reuse the compiled binary and update immediately.
 
-### Turn Off / Remove the Overlay & Auto-Start & Auto-Start
+### Turn Off / Remove the Overlay & Auto-Start
 
 ```zsh
 ./menubar_tint.zsh off
 ```
 
-*(Aliases: `stop`, `quit`, `disable`, `0`)* — This stops the overlay immediately and removes the `LaunchAgent` so it will not relaunch on reboot. — This stops the overlay immediately and removes the `LaunchAgent` so it will not relaunch on reboot.
+*(Aliases: `stop`, `quit`, `disable`, `0`)* — This stops the overlay immediately and removes the `LaunchAgent` so it will not relaunch on reboot.
 
 Emergency fallback if you want to terminate the process manually:
 
