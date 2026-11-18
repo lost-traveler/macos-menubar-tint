@@ -1,4 +1,4 @@
-# menubar-tint
+# menubar_tint
 
 <img width="1408" height="881" alt="screen" src="https://github.com/user-attachments/assets/2221f398-59dc-4e12-bf0f-5417a2776472" />
 
