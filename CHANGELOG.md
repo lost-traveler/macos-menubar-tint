@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.01] - 2026-11-17
+
+### Fixed
+- **Auto-Hidden Dock Interference:** Restricted full-screen `Dock` overlay detection to `layer < 20` (with `alpha > 0.01`) so sliding the pointer to reveal an auto-hidden Dock (`layer == 20`) no longer disables the menu bar tint.
+- **Desktop Reveal Solid-Color Flash:** Set `allowsSubstituteColor = false` on `CABackdropLayer` to prevent a brief solid-color bar flash during "Click wallpaper to reveal desktop" animations.
+
 ## [v2.0.0] - 2026-11-17
 
 ### Added
