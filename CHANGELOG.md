@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.0.2] - 2026-11-17
+
+### Fixed
+- **Mission Control Detection on macOS 27:** Added detection for `WindowManager`'s `ExposeShieldWindow` (`layer == 19`) so Mission Control / Exposé hides the overlay reliably without conflicting with the auto-hidden `Dock` window at `layer == 20`.
+
 ## [v2.0.1] - 2026-11-17
 
 ### Fixed

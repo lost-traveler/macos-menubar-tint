@@ -264,14 +264,24 @@ final class OverlayController: NSObject {
             }
 
             let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+            let winAlpha = info[kCGWindowAlpha as String] as? Double ?? 1.0
 
             // ScreenSaverEngine fallback
             if owner == "ScreenSaverEngine", bounds.intersects(cgScreenRect) {
                 return true
             }
 
-            // Mission Control / Exposé (ignore Dock layer >= 20 used by auto-hide Dock)
-            let winAlpha = info[kCGWindowAlpha as String] as? Double ?? 1.0
+            // Mission Control / Exposé (WindowManager shield at layer 19 on modern macOS; avoid kCGWindowName which is redacted without Screen Recording)
+            if owner == "WindowManager",
+               layer == 19,
+               winAlpha > 0.01,
+               bounds.intersects(cgScreenRect),
+               bounds.width >= cgScreenRect.width * 0.85,
+               bounds.height >= cgScreenRect.height * 0.85 {
+                return true
+            }
+
+            // Mission Control / Exposé (older macOS Dock layer < 20 or top Spaces bar; ignore auto-hide Dock at layer >= 20)
             if owner == "Dock",
                layer > 0,
                winAlpha > 0.01,
