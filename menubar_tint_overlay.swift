@@ -41,7 +41,7 @@ final class OverlayController: NSObject {
             object: nil
         )
 
-        // Detecta Mission Control / Exposé sin esperar notificaciones de cambio de Space
+        // Detect Mission Control / Exposé without waiting for Space-change notifications
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.updateVisibilityForAllScreens(forceRefresh: false)
         }
@@ -76,12 +76,12 @@ final class OverlayController: NSObject {
         let fullFrame = screen.frame
         let visibleFrame = screen.visibleFrame
 
-        // 1. Barra de menús oculta (pantalla completa o auto-ocultar)
+        // 1. Menu bar is hidden (native fullscreen or auto-hide menu bar)
         if (fullFrame.maxY - visibleFrame.maxY) < 1.0 {
             return true
         }
 
-        // Convierte coordenadas de AppKit (abajo-izquierda) a CoreGraphics (arriba-izquierda)
+        // Convert AppKit coordinates (bottom-left origin) to CoreGraphics (top-left origin)
         guard let mainScreen = NSScreen.screens.first else { return false }
         let mainHeight = mainScreen.frame.height
         let cgScreenRect = CGRect(
@@ -102,7 +102,7 @@ final class OverlayController: NSObject {
                 continue
             }
 
-            // 2. Ventana de app en pantalla completa (nivel normal cubriendo toda la pantalla)
+            // 2. Normal app window covering the entire screen (fullscreen mode)
             if layer == 0,
                abs(bounds.origin.x - cgScreenRect.origin.x) <= 2,
                abs(bounds.origin.y - cgScreenRect.origin.y) <= 2,
@@ -111,7 +111,7 @@ final class OverlayController: NSObject {
                 return true
             }
 
-            // 3. Mission Control / Exposé (Dock dibuja una ventana superpuesta de pantalla completa con layer > 0)
+            // 3. Mission Control / Exposé (Dock renders a full-screen overlay window at layer > 0)
             if let owner = info[kCGWindowOwnerName as String] as? String,
                owner == "Dock",
                layer > 0,
@@ -162,7 +162,7 @@ final class OverlayController: NSObject {
         hiddenState.removeAll()
 
         guard let backdropClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
-            fputs("Error: CABackdropLayer no está disponible en esta versión de macOS.\n", stderr)
+            fputs("Error: CABackdropLayer is not available on this version of macOS.\n", stderr)
             exit(2)
         }
 
@@ -238,7 +238,7 @@ final class OverlayController: NSObject {
             tintLayer.backgroundColor = CGColor(srgbRed: r, green: g, blue: b, alpha: alpha)
             tintLayer.compositingFilter = makeMultiplyFilter()
 
-            // Mantiene el árbol de capas activo en GPU para impedir el aplanado tras 1s de inactividad
+            // Keep layer tree active on GPU to prevent WindowServer from flattening after ~1s of inactivity
             let keepAlive = CABasicAnimation(keyPath: "opacity")
             keepAlive.fromValue = 0.996
             keepAlive.toValue = 1.0
@@ -264,7 +264,7 @@ guard CommandLine.arguments.count >= 4,
       let r = Double(CommandLine.arguments[1]),
       let g = Double(CommandLine.arguments[2]),
       let b = Double(CommandLine.arguments[3]) else {
-    fputs("Uso: menubar_tint_overlay <r> <g> <b> [alpha]\n", stderr)
+    fputs("Usage: menubar_tint_overlay <r> <g> <b> [alpha]\n", stderr)
     exit(1)
 }
 

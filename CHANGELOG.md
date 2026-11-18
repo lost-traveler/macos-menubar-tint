@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.03.1] - 2026-11-16
+
+### Changed
+- **English Localization:** Translated all CLI prompts, status messages, error outputs, and code comments in `menubar_tint.zsh` and `menubar_tint_overlay.swift` to English.
+
 ## [v1.03] - 2026-11-16
 
 ### Added
