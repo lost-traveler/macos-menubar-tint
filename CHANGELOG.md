@@ -1,5 +1,14 @@
 # Changelog
 
+## [v1.03] - 2026-11-16
+
+### Added
+- **Auto-Start on Login (`LaunchAgent`):** Applying a color now automatically creates/updates `~/Library/LaunchAgents/com.macos.menubar-tint.plist` (`RunAtLoad = true`) and registers it via `launchctl bootstrap` so the tint persists across reboots.
+- **Persistent Binary Location:** Compiled overlay binary is now stored at `~/.local/bin/menubar_tint_overlay` instead of `/tmp` so it survives system restarts.
+
+### Changed
+- Running `./menubar_tint.zsh off` now stops the overlay and cleanly unloads and removes the `LaunchAgent` plist so it will not relaunch on the next login.
+
 ## [v1.02] - 2026-11-16
 
 ### Fixed
