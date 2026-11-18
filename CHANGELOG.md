@@ -3,7 +3,7 @@
 ## [v2.0.2] - 2026-11-17
 
 ### Fixed
-- **Mission Control Detection on macOS 27:** Added detection for `WindowManager`'s `ExposeShieldWindow` (`layer == 19`) so Mission Control / Exposé hides the overlay reliably without conflicting with the auto-hidden `Dock` window at `layer == 20`.
+- **Mission Control Detection on macOS 27:** Added detection for `WindowManager`'s shield window at `layer == 19` (without relying on `kCGWindowName`, which is redacted without Screen Recording permission) so Mission Control / Exposé hides the overlay reliably without conflicting with the auto-hidden `Dock` at `layer == 20` or disabling tinting during Show Desktop.
 
 ## [v2.0.1] - 2026-11-17
 
