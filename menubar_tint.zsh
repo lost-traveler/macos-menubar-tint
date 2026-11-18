@@ -57,6 +57,22 @@ write_launch_agent() {
 EOF
 }
 
+ensure_icloud_downloaded() {
+  if [[ "$SWIFT_SRC" == *"com~apple~CloudDocs"* ]] && command -v brctl >/dev/null 2>&1; then
+    if [ ! -f "$SWIFT_SRC" ] && [ -f "$SCRIPT_DIR/.${SWIFT_SRC:t}.icloud" ]; then
+      echo "Downloading $SWIFT_SRC from iCloud Drive..."
+      brctl download "$SWIFT_SRC" 2>/dev/null || true
+      local tries=0
+      while [ ! -f "$SWIFT_SRC" ] && [ $tries -lt 20 ]; do
+        sleep 0.5
+        tries=$((tries + 1))
+      done
+    else
+      brctl download "$SWIFT_SRC" 2>/dev/null || true
+    fi
+  fi
+}
+
 if [ $# -ge 1 ]; then
   ARG1="$1"
 else
@@ -86,6 +102,8 @@ fi
 R_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[1,2]})) / 255 }")
 G_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[3,4]})) / 255 }")
 B_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[5,6]})) / 255 }")
+
+ensure_icloud_downloaded
 
 mkdir -p "$BIN_DIR"
 if [ ! -x "$BIN_PATH" ] || [ "$SWIFT_SRC" -nt "$BIN_PATH" ]; then

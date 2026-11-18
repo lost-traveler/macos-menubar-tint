@@ -6,6 +6,7 @@ final class OverlayController: NSObject {
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private var backdropLayers: [CGDirectDisplayID: CALayer] = [:]
     private var hiddenState: [CGDirectDisplayID: Bool] = [:]
+    private var isScreenLockedOrSaver = false
     private var pollTimer: Timer?
     private let r: CGFloat
     private let g: CGFloat
@@ -40,15 +41,63 @@ final class OverlayController: NSObject {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+        wsnc.addObserver(
+            self,
+            selector: #selector(didWakeFromSleep),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
 
-        // Detect Mission Control / Exposé without waiting for Space-change notifications
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(
+            self,
+            selector: #selector(screenLockedOrSaverStarted),
+            name: NSNotification.Name("com.apple.screenIsLocked"),
+            object: nil
+        )
+        dnc.addObserver(
+            self,
+            selector: #selector(screenLockedOrSaverStarted),
+            name: NSNotification.Name("com.apple.screensaver.didstart"),
+            object: nil
+        )
+        dnc.addObserver(
+            self,
+            selector: #selector(screenUnlockedOrSaverStopped),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"),
+            object: nil
+        )
+        dnc.addObserver(
+            self,
+            selector: #selector(screenUnlockedOrSaverStopped),
+            name: NSNotification.Name("com.apple.screensaver.didstop"),
+            object: nil
+        )
+
+        // Lightweight state poll (50ms) for Mission Control / Exposé, screencaptureui, and auto-hide menu bar
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.updateVisibilityForAllScreens(forceRefresh: false)
         }
     }
 
     @objc private func screensChanged() {
         rebuildWindows()
+    }
+
+    @objc private func didWakeFromSleep() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.rebuildWindows()
+        }
+    }
+
+    @objc private func screenLockedOrSaverStarted() {
+        isScreenLockedOrSaver = true
+        updateVisibilityForAllScreens(forceRefresh: false)
+    }
+
+    @objc private func screenUnlockedOrSaverStopped() {
+        isScreenLockedOrSaver = false
+        updateVisibilityForAllScreens(forceRefresh: true)
     }
 
     @objc private func spaceOrAppChanged() {
@@ -72,28 +121,30 @@ final class OverlayController: NSObject {
         return (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
     }
 
-    private func shouldHideOverlay(for screen: NSScreen) -> Bool {
+    private func cgRect(for screen: NSScreen) -> CGRect {
+        let primaryScreen = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.screens.first
+        let mainHeight = primaryScreen?.frame.height ?? screen.frame.height
         let fullFrame = screen.frame
-        let visibleFrame = screen.visibleFrame
-
-        // 1. Menu bar is hidden (native fullscreen or auto-hide menu bar)
-        if (fullFrame.maxY - visibleFrame.maxY) < 1.0 {
-            return true
-        }
-
-        // Convert AppKit coordinates (bottom-left origin) to CoreGraphics (top-left origin)
-        guard let mainScreen = NSScreen.screens.first else { return false }
-        let mainHeight = mainScreen.frame.height
-        let cgScreenRect = CGRect(
+        return CGRect(
             x: fullFrame.minX,
             y: mainHeight - fullFrame.maxY,
             width: fullFrame.width,
             height: fullFrame.height
         )
+    }
 
-        guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
-            return false
+    private func shouldHideOverlay(for screen: NSScreen, infoList: [[String: Any]]) -> Bool {
+        if isScreenLockedOrSaver {
+            return true
         }
+
+        let fullFrame = screen.frame
+        let visibleFrame = screen.visibleFrame
+        let cgScreenRect = cgRect(for: screen)
+        let topInset = fullFrame.maxY - visibleFrame.maxY
+
+        var menuBarWindowVisible = false
+        var fullscreenAppWindow = false
 
         for info in infoList {
             guard let layer = info[kCGWindowLayer as String] as? Int,
@@ -102,35 +153,70 @@ final class OverlayController: NSObject {
                 continue
             }
 
-            // 2. Normal app window covering the entire screen (fullscreen mode)
+            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+
+            // Screenshot selection UI active on this screen
+            if (owner == "screencaptureui" || owner == "Screenshot"),
+               bounds.intersects(cgScreenRect) {
+                return true
+            }
+
+            // ScreenSaverEngine fallback
+            if owner == "ScreenSaverEngine", bounds.intersects(cgScreenRect) {
+                return true
+            }
+
+            // Mission Control / Exposé (Dock renders full-screen overlay or top Spaces bar at layer > 0)
+            if owner == "Dock",
+               layer > 0,
+               bounds.intersects(cgScreenRect),
+               ((bounds.width >= cgScreenRect.width * 0.85 && bounds.height >= cgScreenRect.height * 0.85) ||
+                (bounds.minY <= cgScreenRect.minY + 5 && bounds.width >= cgScreenRect.width * 0.5 && bounds.height >= 40 && bounds.height <= 250)) {
+                return true
+            }
+
+            // Active Window Server Menubar strip at the top of this screen (helps with auto-hide & tiling WMs)
+            if owner == "Window Server",
+               layer == 24,
+               bounds.intersects(cgScreenRect),
+               bounds.minY >= cgScreenRect.minY - 2,
+               bounds.minY <= cgScreenRect.minY + 6,
+               bounds.width >= cgScreenRect.width * 0.85,
+               bounds.height >= 18,
+               bounds.height <= 64 {
+                menuBarWindowVisible = true
+            }
+
+            // Normal app window covering the entire screen
             if layer == 0,
                abs(bounds.origin.x - cgScreenRect.origin.x) <= 2,
                abs(bounds.origin.y - cgScreenRect.origin.y) <= 2,
                abs(bounds.width - cgScreenRect.width) <= 2,
                abs(bounds.height - cgScreenRect.height) <= 2 {
-                return true
+                fullscreenAppWindow = true
             }
+        }
 
-            // 3. Mission Control / Exposé (Dock renders a full-screen overlay window at layer > 0)
-            if let owner = info[kCGWindowOwnerName as String] as? String,
-               owner == "Dock",
-               layer > 0,
-               bounds.intersects(cgScreenRect),
-               bounds.width >= cgScreenRect.width * 0.85,
-               bounds.height >= cgScreenRect.height * 0.85 {
-                return true
-            }
+        // If menu bar is visible (either via visibleFrame inset or Window Server Menubar window), keep overlay unless fullscreen hid it
+        if topInset < 1.0 && !menuBarWindowVisible {
+            return true
+        }
+
+        if fullscreenAppWindow && !menuBarWindowVisible {
+            return true
         }
 
         return false
     }
 
     private func updateVisibilityForAllScreens(forceRefresh: Bool) {
+        let infoList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+
         for screen in NSScreen.screens {
             let did = displayID(for: screen)
             guard let window = windows[did] else { continue }
 
-            let shouldHide = shouldHideOverlay(for: screen)
+            let shouldHide = shouldHideOverlay(for: screen, infoList: infoList)
             let wasHidden = hiddenState[did]
 
             if shouldHide {
