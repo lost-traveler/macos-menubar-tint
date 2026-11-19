@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2.2.0] - 2026-11-19
+
+### Fixed
+- **Locale-Independent Numeric Formatting (`LC_ALL=C awk`):** Prefixed `awk` opacity validation and RGB floating-point conversions in `menubar_tint.zsh` with `LC_ALL=C` so systems using comma decimal separators (`es_ES`, `de_DE`, `fr_FR`, etc.) always pass dot-decimal floats to the Swift overlay binary instead of failing argument parsing.
+- **Notched Display & Auto-Hidden Menu Bar Height Accuracy:** Updated `rebuildWindows()` to check `screen.safeAreaInsets.top` when `topInset` is `0` (such as when the menu bar is set to auto-hide at launch on notched MacBooks), and added live height synchronization against the active `Window Server` `Menubar` window (`layer == 24`) in `shouldHideOverlay()` so the overlay always covers the full menu bar height.
+- **Real-Time Dark/Light Appearance Fallback (`NSApp.effectiveAppearance`):** Replaced `UserDefaults.standard.string(forKey: "AppleInterfaceStyle")` with `NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua` so `auto` mode's system theme fallback reflects Dark and Light Mode transitions immediately without stale `UserDefaults` caching.
+
 ## [v2.1.0] - 2026-11-18
 
 ### Improved

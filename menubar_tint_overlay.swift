@@ -162,7 +162,8 @@ final class OverlayController: NSObject {
     }
 
     private func isSystemDarkMode() -> Bool {
-        return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        let match = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        return match == .darkAqua
     }
 
     private func topStripLuminance(for screen: NSScreen) -> Double? {
@@ -333,6 +334,15 @@ final class OverlayController: NSObject {
                bounds.height >= 18,
                bounds.height <= 64 {
                 menuBarWindowVisible = true
+                if let window = windows[displayID(for: screen)], abs(window.frame.height - bounds.height) > 0.5 {
+                    let newRect = NSRect(
+                        x: fullFrame.minX,
+                        y: fullFrame.maxY - bounds.height,
+                        width: fullFrame.width,
+                        height: bounds.height
+                    )
+                    window.setFrame(newRect, display: true)
+                }
             }
 
             // Normal app window covering the entire screen
@@ -420,7 +430,8 @@ final class OverlayController: NSObject {
             let fullFrame = screen.frame
             let visibleFrame = screen.visibleFrame
             let topInset = fullFrame.maxY - visibleFrame.maxY
-            let barHeight = topInset > 0 ? topInset : max(NSStatusBar.system.thickness, 24)
+            let safeTop = screen.safeAreaInsets.top
+            let barHeight = topInset > 0 ? topInset : (safeTop > 0 ? safeTop : max(NSStatusBar.system.thickness, 24))
 
             let barRect = NSRect(
                 x: fullFrame.minX,

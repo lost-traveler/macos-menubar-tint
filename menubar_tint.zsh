@@ -155,14 +155,14 @@ if [[ ! "$HEX" =~ ^[0-9A-Fa-f]{6}$ ]]; then
   exit 1
 fi
 
-if ! awk "BEGIN { exit !($ALPHA >= 0.05 && $ALPHA <= 1.0) }"; then
+if ! LC_ALL=C awk "BEGIN { exit !($ALPHA >= 0.05 && $ALPHA <= 1.0) }"; then
   echo "Error: opacity must be between 0.05 and 1.0 (received: $ALPHA)."
   exit 1
 fi
 
-R_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[1,2]})) / 255 }")
-G_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[3,4]})) / 255 }")
-B_FLOAT=$(awk "BEGIN { printf \"%.6f\", $((16#${HEX[5,6]})) / 255 }")
+R_FLOAT=$(LC_ALL=C awk "BEGIN { printf \"%.6f\", $((16#${HEX[1,2]})) / 255 }")
+G_FLOAT=$(LC_ALL=C awk "BEGIN { printf \"%.6f\", $((16#${HEX[3,4]})) / 255 }")
+B_FLOAT=$(LC_ALL=C awk "BEGIN { printf \"%.6f\", $((16#${HEX[5,6]})) / 255 }")
 
 ensure_icloud_downloaded
 
