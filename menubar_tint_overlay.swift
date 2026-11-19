@@ -10,10 +10,25 @@ enum TintMode: String {
     case light
 }
 
+private struct WallpaperLuminanceCacheEntry {
+    let url: URL
+    let modificationDate: Date?
+    let luminance: Double
+}
+
+private struct ParsedWindowInfo {
+    let layer: Int
+    let owner: String
+    let alpha: Double
+    let bounds: CGRect
+}
+
 final class OverlayController: NSObject {
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private var backdropLayers: [CGDirectDisplayID: CALayer] = [:]
     private var tintLayers: [CGDirectDisplayID: CALayer] = [:]
+    private var appliedFilterNames: [CGDirectDisplayID: String] = [:]
+    private var luminanceCache: [CGDirectDisplayID: WallpaperLuminanceCacheEntry] = [:]
     private var hiddenState: [CGDirectDisplayID: Bool] = [:]
     private var isScreenLockedOrSaver = false
     private var pollTimer: Timer?
@@ -46,13 +61,13 @@ final class OverlayController: NSObject {
         let wsnc = NSWorkspace.shared.notificationCenter
         wsnc.addObserver(
             self,
-            selector: #selector(spaceOrAppChanged),
+            selector: #selector(activeSpaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
         wsnc.addObserver(
             self,
-            selector: #selector(spaceOrAppChanged),
+            selector: #selector(activeAppChanged),
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
@@ -152,13 +167,18 @@ final class OverlayController: NSObject {
         updateBlendModesForAllScreens()
     }
 
-    @objc private func spaceOrAppChanged() {
+    @objc private func activeSpaceChanged() {
         triggerFastPollBurst()
         updateBlendModesForAllScreens()
         updateVisibilityForAllScreens(forceRefresh: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.updateVisibilityForAllScreens(forceRefresh: true)
         }
+    }
+
+    @objc private func activeAppChanged() {
+        triggerFastPollBurst()
+        updateVisibilityForAllScreens(forceRefresh: false)
     }
 
     private func isSystemDarkMode() -> Bool {
@@ -174,6 +194,14 @@ final class OverlayController: NSObject {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
             return nil
+        }
+
+        let did = displayID(for: screen)
+        let modDate = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
+        if let cached = luminanceCache[did],
+           cached.url == url,
+           cached.modificationDate == modDate {
+            return cached.luminance
         }
 
         let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
@@ -215,7 +243,9 @@ final class OverlayController: NSObject {
         let pr = Double(pixel[0]) / 255.0
         let pg = Double(pixel[1]) / 255.0
         let pb = Double(pixel[2]) / 255.0
-        return 0.2126 * pr + 0.7152 * pg + 0.0722 * pb
+        let lum = 0.2126 * pr + 0.7152 * pg + 0.0722 * pb
+        luminanceCache[did] = WallpaperLuminanceCacheEntry(url: url, modificationDate: modDate, luminance: lum)
+        return lum
     }
 
     private func resolvedFilterType(for screen: NSScreen) -> (caName: String, ciName: String) {
@@ -240,8 +270,7 @@ final class OverlayController: NSObject {
         }
     }
 
-    private func makeBlendFilter(for screen: NSScreen) -> Any? {
-        let filterNames = resolvedFilterType(for: screen)
+    private func makeBlendFilter(from filterNames: (caName: String, ciName: String)) -> Any? {
         if let caFilterClass = NSClassFromString("CAFilter") as? NSObject.Type {
             let sel = NSSelectorFromString("filterWithType:")
             if caFilterClass.responds(to: sel) {
@@ -256,7 +285,11 @@ final class OverlayController: NSObject {
         for screen in NSScreen.screens {
             let did = displayID(for: screen)
             guard let tintLayer = tintLayers[did] else { continue }
-            tintLayer.compositingFilter = makeBlendFilter(for: screen)
+            let filterNames = resolvedFilterType(for: screen)
+            if appliedFilterNames[did] != filterNames.caName {
+                tintLayer.compositingFilter = makeBlendFilter(from: filterNames)
+                appliedFilterNames[did] = filterNames.caName
+            }
         }
     }
 
@@ -276,11 +309,24 @@ final class OverlayController: NSObject {
         )
     }
 
-    private func shouldHideOverlay(for screen: NSScreen, infoList: [[String: Any]]) -> Bool {
-        if isScreenLockedOrSaver || IsSecureEventInputEnabled() {
-            return true
+    private func parseRelevantWindows(from rawList: [[String: Any]]) -> [ParsedWindowInfo] {
+        var parsed: [ParsedWindowInfo] = []
+        parsed.reserveCapacity(rawList.count)
+        for info in rawList {
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  layer >= 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
+                continue
+            }
+            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+            let alpha = info[kCGWindowAlpha as String] as? Double ?? 1.0
+            parsed.append(ParsedWindowInfo(layer: layer, owner: owner, alpha: alpha, bounds: bounds))
         }
+        return parsed
+    }
 
+    private func shouldHideOverlay(for screen: NSScreen, windowsInfo: [ParsedWindowInfo]) -> Bool {
         let fullFrame = screen.frame
         let visibleFrame = screen.visibleFrame
         let cgScreenRect = cgRect(for: screen)
@@ -289,15 +335,11 @@ final class OverlayController: NSObject {
         var menuBarWindowVisible = false
         var fullscreenAppWindow = false
 
-        for info in infoList {
-            guard let layer = info[kCGWindowLayer as String] as? Int,
-                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
-                continue
-            }
-
-            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
-            let winAlpha = info[kCGWindowAlpha as String] as? Double ?? 1.0
+        for win in windowsInfo {
+            let layer = win.layer
+            let owner = win.owner
+            let winAlpha = win.alpha
+            let bounds = win.bounds
 
             // ScreenSaverEngine fallback
             if owner == "ScreenSaverEngine", bounds.intersects(cgScreenRect) {
@@ -368,7 +410,7 @@ final class OverlayController: NSObject {
     }
 
     private func updateVisibilityForAllScreens(forceRefresh: Bool) {
-        if isScreenLockedOrSaver {
+        if isScreenLockedOrSaver || IsSecureEventInputEnabled() {
             for screen in NSScreen.screens {
                 let did = displayID(for: screen)
                 guard let window = windows[did] else { continue }
@@ -380,13 +422,14 @@ final class OverlayController: NSObject {
             return
         }
 
-        let infoList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
+        let rawList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        let parsedWindows = parseRelevantWindows(from: rawList)
 
         for screen in NSScreen.screens {
             let did = displayID(for: screen)
             guard let window = windows[did] else { continue }
 
-            let shouldHide = shouldHideOverlay(for: screen, infoList: infoList)
+            let shouldHide = shouldHideOverlay(for: screen, windowsInfo: parsedWindows)
             let wasHidden = hiddenState[did]
 
             if shouldHide {
@@ -416,6 +459,8 @@ final class OverlayController: NSObject {
         windows.removeAll()
         backdropLayers.removeAll()
         tintLayers.removeAll()
+        appliedFilterNames.removeAll()
+        luminanceCache.removeAll()
         hiddenState.removeAll()
 
         guard let backdropClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
@@ -497,7 +542,9 @@ final class OverlayController: NSObject {
             tintLayer.frame = rootLayer.bounds
             tintLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             tintLayer.backgroundColor = CGColor(srgbRed: r, green: g, blue: b, alpha: alpha)
-            tintLayer.compositingFilter = makeBlendFilter(for: screen)
+            let filterNames = resolvedFilterType(for: screen)
+            tintLayer.compositingFilter = makeBlendFilter(from: filterNames)
+            appliedFilterNames[did] = filterNames.caName
 
             // Discrete pulse every 0.8s (instead of 60/120Hz interpolation) to prevent WindowServer flattening while minimizing CPU/energy
             let keepAlive = CAKeyframeAnimation(keyPath: "opacity")
@@ -507,6 +554,9 @@ final class OverlayController: NSObject {
             keepAlive.calculationMode = .discrete
             keepAlive.repeatCount = .infinity
             keepAlive.isRemovedOnCompletion = false
+            if #available(macOS 12.0, *) {
+                keepAlive.preferredFrameRateRange = CAFrameRateRange(minimum: 1, maximum: 15, preferred: 1)
+            }
             tintLayer.add(keepAlive, forKey: "keepAlive")
 
             rootLayer.addSublayer(backdropLayer)

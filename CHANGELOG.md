@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.3.0] - 2026-11-19
+
+### Improved
+- **Wallpaper Luminance & Filter Caching:** Added an in-memory cache keyed by `(displayID, wallpaperURL, modificationDate)` in `topStripLuminance(for:)` to avoid re-decoding wallpapers via `ImageIO` on every Space/theme check, and only reassigns `tintLayer.compositingFilter` when the resolved blend mode (`multiplyBlendMode` vs `screenBlendMode`) actually changes.
+- **Separated App-Focus vs. Space-Change Handling:** Split `didActivateApplicationNotification` from `activeSpaceDidChangeNotification` so switching between apps triggers the fast-poll burst without redundantly re-decoding wallpapers or calling `orderFrontRegardless()` / `setNeedsDisplay()` on already visible overlays.
+- **Lower WindowServer IPC & Single-Pass Window Parsing:** Added `.excludeDesktopElements` to `CGWindowListCopyWindowInfo`, moved `IsSecureEventInputEnabled()` to an early-exit check before querying `WindowServer`, and pre-parsed `layer >= 0` windows once per tick across all connected displays.
+- **Explicit ProMotion Frame-Rate Hint:** Set `preferredFrameRateRange = CAFrameRateRange(minimum: 1, maximum: 15, preferred: 1)` on the discrete `CAKeyframeAnimation` keep-alive (macOS 12+) to reinforce low idle refresh scaling on ProMotion displays.
+
 ## [v2.2.0] - 2026-11-19
 
 ### Fixed
