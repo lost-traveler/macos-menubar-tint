@@ -23,7 +23,7 @@ private struct ParsedWindowInfo {
     let bounds: CGRect
 }
 
-final class OverlayController: NSObject {
+final class OverlayController: NSObject, NSApplicationDelegate {
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private var backdropLayers: [CGDirectDisplayID: CALayer] = [:]
     private var tintLayers: [CGDirectDisplayID: CALayer] = [:]
@@ -49,6 +49,9 @@ final class OverlayController: NSObject {
         self.alpha = alpha
         self.mode = mode
         super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
         rebuildWindows()
 
         NotificationCenter.default.addObserver(
@@ -75,6 +78,12 @@ final class OverlayController: NSObject {
             self,
             selector: #selector(didWakeFromSleep),
             name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        wsnc.addObserver(
+            self,
+            selector: #selector(sessionDidBecomeActive),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
 
@@ -111,6 +120,36 @@ final class OverlayController: NSObject {
         )
 
         schedulePollTimer(interval: idlePollInterval)
+        triggerFastPollBurst(duration: 3.0)
+
+        // Deferred rebuilds for early speculative LaunchAgent startup at boot/login before WindowServer desktop geometry settles
+        for delay in [1.0, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+                if self.windows.isEmpty || self.needsScreenRebuild() {
+                    self.rebuildWindows()
+                } else {
+                    self.updateBlendModesForAllScreens()
+                    self.updateVisibilityForAllScreens(forceRefresh: true)
+                }
+            }
+        }
+    }
+
+    private func needsScreenRebuild() -> Bool {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return false }
+        if windows.count != screens.count {
+            return true
+        }
+        for screen in screens {
+            let did = displayID(for: screen)
+            guard let w = windows[did] else { return true }
+            if w.windowNumber <= 0 || abs(w.frame.width - screen.frame.width) > 0.5 {
+                return true
+            }
+        }
+        return false
     }
 
     private func schedulePollTimer(interval: TimeInterval) {
@@ -152,6 +191,14 @@ final class OverlayController: NSObject {
         }
     }
 
+    @objc private func sessionDidBecomeActive() {
+        isScreenLockedOrSaver = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.rebuildWindows()
+            self?.triggerFastPollBurst(duration: 2.0)
+        }
+    }
+
     @objc private func screenLockedOrSaverStarted() {
         isScreenLockedOrSaver = true
         updateVisibilityForAllScreens(forceRefresh: false)
@@ -160,7 +207,11 @@ final class OverlayController: NSObject {
     @objc private func screenUnlockedOrSaverStopped() {
         isScreenLockedOrSaver = false
         triggerFastPollBurst()
-        updateVisibilityForAllScreens(forceRefresh: true)
+        if needsScreenRebuild() {
+            rebuildWindows()
+        } else {
+            updateVisibilityForAllScreens(forceRefresh: true)
+        }
     }
 
     @objc private func interfaceThemeChanged() {
@@ -422,6 +473,12 @@ final class OverlayController: NSObject {
             return
         }
 
+        // Self-heal if launched speculatively at boot before NSScreen.screens or WindowServer windows were ready
+        if needsScreenRebuild() {
+            rebuildWindows()
+            return
+        }
+
         let rawList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
         let parsedWindows = parseRelevantWindows(from: rawList)
 
@@ -563,9 +620,11 @@ final class OverlayController: NSObject {
             rootLayer.addSublayer(tintLayer)
 
             window.contentView = contentView
+            window.orderFrontRegardless()
             windows[did] = window
             backdropLayers[did] = backdropLayer
             tintLayers[did] = tintLayer
+            hiddenState[did] = false
         }
 
         updateVisibilityForAllScreens(forceRefresh: true)
@@ -595,5 +654,5 @@ default:
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let controller = OverlayController(r: r, g: g, b: b, alpha: alpha, mode: mode)
-_ = controller
+app.delegate = controller
 app.run()

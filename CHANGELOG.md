@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.3.1] - 2026-11-26
+
+### Fixed
+- **Login & Reboot Auto-Start Reliability (`LaunchAgent` & AppKit Lifecycle):** Moved `OverlayController` window creation into `NSApplicationDelegate.applicationDidFinishLaunching(_:)` and added `needsScreenRebuild()`, deferred `+1.0 s` / `+3.0 s` startup checks, and `NSWorkspace.sessionDidBecomeActiveNotification` observers so speculative early `launchd` launches at boot no longer end up running with zero visible windows before `WindowServer` finishes initializing.
+- **Hardened `LaunchAgent` Session Configuration:** Added `LimitLoadToSessionType = Aqua`, `KeepAlive = true`, and `launchctl enable` + `kickstart -k` in `menubar_tint.zsh` so the overlay always loads inside the graphical user session and stays running across logins and reboots.
+
 ## [v2.3.0] - 2026-11-19
 
 ### Improved

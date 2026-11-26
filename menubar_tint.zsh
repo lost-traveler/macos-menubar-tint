@@ -49,10 +49,12 @@ write_launch_agent() {
     <string>$a</string>
     <string>$m</string>
   </array>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <false/>
+  <true/>
 </dict>
 </plist>
 EOF
@@ -174,8 +176,10 @@ fi
 
 stop_overlay "false"
 write_launch_agent "$R_FLOAT" "$G_FLOAT" "$B_FLOAT" "$ALPHA" "$MODE"
+launchctl enable "$GUI_DOMAIN/$PLIST_LABEL" 2>/dev/null || true
 
-if launchctl bootstrap "$GUI_DOMAIN" "$PLIST_PATH" 2>/dev/null; then
+if launchctl bootstrap "$GUI_DOMAIN" "$PLIST_PATH" 2>/dev/null || { sleep 0.2 && launchctl bootstrap "$GUI_DOMAIN" "$PLIST_PATH" 2>/dev/null; }; then
+  launchctl kickstart -k "$GUI_DOMAIN/$PLIST_LABEL" 2>/dev/null || true
   echo "Menu bar tint applied (#${HEX:u}, opacity $ALPHA, mode $MODE) and enabled at login."
 else
   nohup "$BIN_PATH" "$R_FLOAT" "$G_FLOAT" "$B_FLOAT" "$ALPHA" "$MODE" >/dev/null 2>&1 &
