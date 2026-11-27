@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.3.2] - 2026-11-27
+
+### Fixed
+- **Eliminated Slow Launch Delay After Compilation / Color Changes:** Removed the redundant `launchctl kickstart -k` call that ran immediately after `launchctl bootstrap` (which killed the newly started `RunAtLoad` process and waited for `launchd`'s exit timeout before respawning), reduced `ExitTimeOut` to `1` second in the `LaunchAgent` plist, and moved `kickstart -k` to a fallback-only branch so applying or recompiling the utility now starts instantaneously.
+
 ## [v2.3.1] - 2026-11-26
 
 ### Fixed
